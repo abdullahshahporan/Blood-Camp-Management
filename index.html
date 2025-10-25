@@ -1,237 +1,363 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Blood Camp Management Admin Panel</title>
-	<!-- Bootstrap CSS -->
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-	<!-- Bootstrap Icons -->
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-	<!-- Custom CSS -->
-	<link rel="stylesheet" href="style.css">
+	<style>
+		
+		:root {
+			--blood-red: #dc2626;
+			--blood-red-dark: #b91c1c;
+			--blood-red-light: #fee2e2;
+			--medical-blue: #2563eb;
+			--medical-green: #16a34a;
+			--life-orange: #ea580c;
+		}
+		
+		body {
+			font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+			background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+			min-height: 100vh;
+			padding: 2rem 0;
+		}
+		
+		.main-content {
+			max-width: 1400px;
+			margin: 0 auto;
+			padding: 0 1.5rem;
+		}
+		
+		.top-bar {
+			background: white;
+			border-radius: 20px;
+			padding: 2rem;
+			box-shadow: 0 4px 20px rgba(220, 38, 38, 0.1);
+			margin-bottom: 3rem;
+			border-left: 6px solid var(--blood-red);
+		}
+		
+		.top-bar h2 {
+			margin: 0;
+			color: #1f2937;
+			font-weight: 700;
+			font-size: 2rem;
+			display: flex;
+			align-items: center;
+			gap: 1rem;
+		}
+		
+		.top-bar h2 i {
+			color: var(--blood-red);
+			font-size: 2.5rem;
+		}
+		
+		.admin-badge {
+			background: linear-gradient(135deg, var(--blood-red) 0%, var(--blood-red-dark) 100%);
+			color: white;
+			padding: 0.5rem 1.5rem;
+			border-radius: 50px;
+			font-weight: 600;
+			font-size: 1rem;
+			box-shadow: 0 4px 15px rgba(220, 38, 38, 0.3);
+		}
+		
+		.dashboard-card {
+			background: white;
+			border-radius: 20px;
+			padding: 0;
+			box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+			transition: all 0.3s ease;
+			overflow: hidden;
+			text-decoration: none;
+			display: block;
+			border: 2px solid transparent;
+			height: 100%;
+		}
+		
+		.dashboard-card:hover {
+			transform: translateY(-10px);
+			box-shadow: 0 12px 40px rgba(220, 38, 38, 0.2);
+			border-color: var(--blood-red-light);
+		}
+		
+		.card-icon-wrapper {
+			padding: 2rem;
+			text-align: center;
+			position: relative;
+			background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+		}
+		
+		.card-icon-wrapper i {
+			font-size: 4rem;
+			color: var(--blood-red);
+			display: block;
+			animation: pulse 2s ease-in-out infinite;
+		}
+		
+		@keyframes pulse {
+			0%, 100% {
+				transform: scale(1);
+			}
+			50% {
+				transform: scale(1.05);
+			}
+		}
+		
+		.card-body-custom {
+			padding: 2rem;
+			text-align: center;
+		}
+		
+		.card-body-custom h5 {
+			color: #1f2937;
+			font-weight: 700;
+			margin-bottom: 1rem;
+			font-size: 1.4rem;
+		}
+		
+		.card-body-custom p {
+			color: #6b7280;
+			margin: 0;
+			font-size: 0.95rem;
+			line-height: 1.6;
+		}
+		
+		.card-action {
+			margin-top: 1.5rem;
+			padding: 0.75rem 1.5rem;
+			background: var(--blood-red);
+			color: white;
+			border-radius: 50px;
+			font-weight: 600;
+			display: inline-flex;
+			align-items: center;
+			gap: 0.5rem;
+			transition: all 0.3s ease;
+		}
+		
+		.dashboard-card:hover .card-action {
+			background: var(--blood-red-dark);
+			gap: 0.75rem;
+		}
+		
+		/* Specific card colors */
+		.card-locations .card-icon-wrapper {
+			background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+		}
+		.card-locations .card-icon-wrapper i {
+			color: var(--medical-blue);
+		}
+		.card-locations:hover {
+			border-color: #dbeafe;
+		}
+		
+		.card-donors .card-icon-wrapper {
+			background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+		}
+		.card-donors .card-icon-wrapper i {
+			color: var(--blood-red);
+		}
+		
+		.card-camps .card-icon-wrapper {
+			background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+		}
+		.card-camps .card-icon-wrapper i {
+			color: var(--medical-green);
+		}
+		.card-camps:hover {
+			border-color: #dcfce7;
+		}
+		
+		.card-appointments .card-icon-wrapper {
+			background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+		}
+		.card-appointments .card-icon-wrapper i {
+			color: var(--life-orange);
+		}
+		.card-appointments:hover {
+			border-color: #fed7aa;
+		}
+		
+		@media (max-width: 767.98px) {
+			body {
+				padding: 1rem 0;
+			}
+			
+			.main-content {
+				padding: 0 1rem;
+			}
+			
+			.top-bar {
+				padding: 1.5rem;
+				margin-bottom: 2rem;
+			}
+			
+			.top-bar h2 {
+				font-size: 1.4rem;
+				flex-direction: column;
+				text-align: center;
+			}
+			
+			.top-bar h2 i {
+				font-size: 2rem;
+			}
+			
+			.admin-badge {
+				margin-top: 1rem;
+			}
+			
+			.card-icon-wrapper i {
+				font-size: 3rem;
+			}
+			
+			.card-body-custom {
+				padding: 1.5rem;
+			}
+		}
+	</style>
 </head>
 <body>
-	<div class="container-fluid min-vh-100 bg-light">
-		<div class="row flex-nowrap">
-			<!-- Sidebar Slider -->
-			<nav id="sidebarMenu" class="sidebar-slider col-auto col-md-3 col-xl-2 px-sm-2 px-0 bg-primary text-white d-flex flex-column min-vh-100 position-fixed">
-				<div class="d-flex flex-column align-items-center align-items-sm-start px-3 pt-2 text-white min-vh-100">
-					<a href="#" class="d-flex align-items-center pb-3 mb-md-0 me-md-auto text-white text-decoration-none">
-						<span class="fs-4 fw-bold">Admin Panel</span>
+	<div class="main-content">
+		<div class="top-bar">
+			<div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+				<h2>
+					<i class="bi bi-heart-pulse-fill"></i>
+					Blood Camp Management Dashboard
+				</h2>
+				<span class="admin-badge">
+					<i class="bi bi-shield-fill-check"></i> Admin
+				</span>
+			</div>
+		</div>
+		
+		<div class="container-fluid px-0">
+			<div class="row g-4">
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/locations.php" class="dashboard-card card-locations">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-geo-alt-fill"></i>
+						</div>
+						<div class="card-body-custom">
+							<h5>Locations</h5>
+							<p>Manage blood camp locations and addresses</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
+						</div>
 					</a>
-					<ul class="nav nav-pills flex-column mb-sm-auto mb-0 align-items-center align-items-sm-start" id="menu">
-						<li class="nav-item">
-							<a href="index.html" class="nav-link text-white">
-								<i class="bi bi-speedometer2"></i> <span class="ms-2 d-none d-sm-inline">Dashboard</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/locations.php" class="nav-link text-white">
-								<i class="bi bi-geo-alt"></i> <span class="ms-2 d-none d-sm-inline">Locations</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/donors.php" class="nav-link text-white">
-								<i class="bi bi-person-heart"></i> <span class="ms-2 d-none d-sm-inline">Donors</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/camps.php" class="nav-link text-white">
-								<i class="bi bi-calendar-event"></i> <span class="ms-2 d-none d-sm-inline">Camps</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/appointments.php" class="nav-link text-white">
-								<i class="bi bi-calendar-check"></i> <span class="ms-2 d-none d-sm-inline">Appointments</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/donations.php" class="nav-link text-white">
-								<i class="bi bi-droplet-half"></i> <span class="ms-2 d-none d-sm-inline">Donations</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/blood_units.php" class="nav-link text-white">
-								<i class="bi bi-capsule"></i> <span class="ms-2 d-none d-sm-inline">Blood Units</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/blood_requests.php" class="nav-link text-white">
-								<i class="bi bi-journal-medical"></i> <span class="ms-2 d-none d-sm-inline">Blood Requests</span>
-							</a>
-						</li>
-						<li>
-							<a href="php/allocations.php" class="nav-link text-white">
-								<i class="bi bi-arrow-left-right"></i> <span class="ms-2 d-none d-sm-inline">Allocations</span>
-							</a>
-						</li>
-					</ul>
 				</div>
-			</nav>
-			<!-- Sidebar Toggle Button -->
-			<button class="btn btn-light sidebar-toggle d-md-none position-fixed top-0 start-0 m-3 z-3 rounded-circle shadow" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebarMenu" aria-controls="sidebarMenu">
-				<i class="bi bi-list fs-2"></i>
-			</button>
-			<!-- Main Content -->
-			<div class="col offset-md-3 offset-xl-2 py-3">
-				<div class="container">
-					<div class="d-flex justify-content-between align-items-center mb-4">
-						<h2 class="fw-bold display-5 text-gradient">Blood Camp Management Dashboard</h2>
-						<span class="badge bg-primary fs-6 rounded-pill px-4 py-2 shadow admin-badge">Admin</span>
-					</div>
-					<div class="row g-4 justify-content-center">
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/locations.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-geo-alt fs-1 text-primary"></i>
-									<h5 class="card-title mt-2">Locations</h5>
-									<p class="card-text">Manage blood camp locations and addresses.</p>
-								</div>
-							</a>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/donors.php" class="dashboard-card card-donors">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-heart-fill"></i>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/donors.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-person-heart fs-1 text-danger"></i>
-									<h5 class="card-title mt-2">Donors</h5>
-									<p class="card-text">View, add, and manage blood donors.</p>
-								</div>
-							</a>
+						<div class="card-body-custom">
+							<h5>Donors</h5>
+							<p>View, add, and manage blood donors</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/camps.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-calendar-event fs-1 text-success"></i>
-									<h5 class="card-title mt-2">Camps</h5>
-									<p class="card-text">Organize and manage blood donation camps.</p>
-								</div>
-							</a>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/camps.php" class="dashboard-card card-camps">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-calendar-heart-fill"></i>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/appointments.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-calendar-check fs-1 text-info"></i>
-									<h5 class="card-title mt-2">Appointments</h5>
-									<p class="card-text">Schedule and track donor appointments.</p>
-								</div>
-							</a>
+						<div class="card-body-custom">
+							<h5>Camps</h5>
+							<p>Organize and manage blood donation camps</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/donations.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-droplet-half fs-1 text-danger"></i>
-									<h5 class="card-title mt-2">Donations</h5>
-									<p class="card-text">Record and monitor blood donations.</p>
-								</div>
-							</a>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/appointments.php" class="dashboard-card card-appointments">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-calendar-check-fill"></i>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/blood_units.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-capsule fs-1 text-warning"></i>
-									<h5 class="card-title mt-2">Blood Units</h5>
-									<p class="card-text">Track blood units and their status.</p>
-								</div>
-							</a>
+						<div class="card-body-custom">
+							<h5>Appointments</h5>
+							<p>Schedule and track donor appointments</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/blood_requests.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-journal-medical fs-1 text-primary"></i>
-									<h5 class="card-title mt-2">Blood Requests</h5>
-									<p class="card-text">Manage and fulfill blood requests.</p>
-								</div>
-							</a>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/donations.php" class="dashboard-card card-donors">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-droplet-fill"></i>
 						</div>
-						<div class="col-md-5 col-lg-4 col-xl-3">
-							<a href="php/allocations.php" class="card shadow-lg h-100 card-glass text-decoration-none text-dark">
-								<div class="card-body text-center">
-									<i class="bi bi-arrow-left-right fs-1 text-secondary"></i>
-									<h5 class="card-title mt-2">Allocations</h5>
-									<p class="card-text">Allocate blood units to requests.</p>
-								</div>
-							</a>
+						<div class="card-body-custom">
+							<h5>Donations</h5>
+							<p>Record and monitor blood donations</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
 						</div>
-					</div>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/blood_units.php" class="dashboard-card card-appointments">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-moisture"></i>
+						</div>
+						<div class="card-body-custom">
+							<h5>Blood Units</h5>
+							<p>Track blood units and their status</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
+						</div>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/blood_requests.php" class="dashboard-card card-locations">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-hospital-fill"></i>
+						</div>
+						<div class="card-body-custom">
+							<h5>Blood Requests</h5>
+							<p>Manage and fulfill blood requests</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
+						</div>
+					</a>
+				</div>
+				
+				<div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+					<a href="php/allocations.php" class="dashboard-card card-camps">
+						<div class="card-icon-wrapper">
+							<i class="bi bi-check2-circle"></i>
+						</div>
+						<div class="card-body-custom">
+							<h5>Allocations</h5>
+							<p>Allocate blood units to requests</p>
+							<span class="card-action">
+								View Details <i class="bi bi-arrow-right"></i>
+							</span>
+						</div>
+					</a>
 				</div>
 			</div>
 		</div>
 	</div>
-	<style>
-		.sidebar-slider {
-			transition: all 0.3s cubic-bezier(.25,.8,.25,1);
-			z-index: 1040;
-		}
-		.sidebar-toggle {
-			background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-			color: #fff;
-			border: none;
-		}
-		.sidebar-toggle:focus {
-			outline: none;
-			box-shadow: 0 0 0 0.2rem #6366f1;
-		}
-		.admin-badge {
-			background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
-			color: #fff;
-			font-weight: 600;
-			font-size: 1.1rem;
-			border-radius: 50px;
-			letter-spacing: 1px;
-		}
-		.text-gradient {
-			background: linear-gradient(90deg, #6366f1 0%, #4f46e5 100%);
-			-webkit-background-clip: text;
-			-webkit-text-fill-color: transparent;
-			background-clip: text;
-			text-fill-color: transparent;
-		}
-		.card-glass {
-			background: rgba(255,255,255,0.85);
-			border: 1px solid rgba(99,102,241,0.08);
-			box-shadow: 0 8px 32px 0 rgba(99,102,241,0.10);
-			backdrop-filter: blur(2px);
-		}
-		.card-glass:hover {
-			background: rgba(255,255,255,0.95);
-			box-shadow: 0 12px 36px 0 rgba(99,102,241,0.18);
-		}
-		@media (max-width: 991.98px) {
-			#sidebarMenu {
-				left: -260px;
-				width: 220px;
-				position: fixed;
-			}
-			#sidebarMenu.show {
-				left: 0;
-			}
-			.col.offset-md-3.offset-xl-2 {
-				margin-left: 0 !important;
-			}
-		}
-	</style>
-	<script>
-		// Sidebar toggle for mobile
-		document.addEventListener('DOMContentLoaded', function() {
-			var sidebar = document.getElementById('sidebarMenu');
-			var toggleBtn = document.querySelector('.sidebar-toggle');
-			if(toggleBtn) {
-				toggleBtn.addEventListener('click', function() {
-					sidebar.classList.toggle('show');
-				});
-			}
-			// Hide sidebar on click outside (mobile)
-			document.addEventListener('click', function(e) {
-				if(window.innerWidth < 992 && sidebar.classList.contains('show')) {
-					if(!sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
-						sidebar.classList.remove('show');
-					}
-				}
-			});
-		});
-	</script>
+	
 	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
