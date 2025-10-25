@@ -377,7 +377,7 @@ include '_header.php';
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#1 JOIN (Multiple Tables)</div>
+                        <div class="query-badge">#1 JOIN (Multiple Tables)-Purpose: Display all donations</div>
                         <div class="query-sql">SELECT d.donation_id, d.donation_time,
        d.volume_ml, donor.full_name,
        donor.blood_group, camp.title,
@@ -391,13 +391,13 @@ ORDER BY d.donation_time DESC</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#2 AGGREGATE (SUM)</div>
+                        <div class="query-badge">#2 AGGREGATE (SUM) -Purpose: Calculate the total volume of blood donated</div>
                         <div class="query-sql">SELECT SUM(volume_ml) as total
 FROM donation</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#3 GROUP BY + JOIN</div>
+                        <div class="query-badge">#3 GROUP BY + JOIN -Purpose: Show the number of donations and total volume per blood group</div>
                         <div class="query-sql">SELECT donor.blood_group,
        COUNT(d.donation_id) as total_donations,
        SUM(d.volume_ml) as total_volume
@@ -408,7 +408,7 @@ ORDER BY total_donations DESC</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#4 DATE + SUBQUERY</div>
+                        <div class="query-badge">#4 DATE + SUBQUERY - Purpose: Count how many donations occurred in the last 30 days.</div>
                         <div class="query-sql">SELECT COUNT(*) as count
 FROM donation
 WHERE donation_time >= 
@@ -416,7 +416,7 @@ WHERE donation_time >=
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#5 HAVING + LIMIT</div>
+                        <div class="query-badge">#5 HAVING + LIMIT - Purpose: Find the Top 5 donors</div>
                         <div class="query-sql">SELECT donor.full_name, 
        COUNT(d.donation_id) as donation_count,
        SUM(d.volume_ml) as total_donated
@@ -430,7 +430,7 @@ LIMIT 5</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#6 LEFT JOIN + GROUP BY</div>
+                        <div class="query-badge">#6 LEFT JOIN + GROUP BY - Purpose: Display total donations and volume for each camp</div>
                         <div class="query-sql">SELECT camp.title, location.name,
        COUNT(d.donation_id) as total_donations,
        SUM(d.volume_ml) as total_volume
@@ -444,7 +444,7 @@ ORDER BY total_donations DESC</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#7 INSERT</div>
+                        <div class="query-badge">#7 INSERT - Purpose: Add a new donation</div>
                         <div class="query-sql">INSERT INTO donation 
   (donor_id, camp_id, donation_time, 
    volume_ml, created_at)
@@ -452,7 +452,7 @@ VALUES (?, ?, ?, ?, NOW())</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#8 UPDATE</div>
+                        <div class="query-badge">#8 UPDATE - Purpose: Edit an existing donation</div>
                         <div class="query-sql">UPDATE donation
 SET donor_id=?, camp_id=?, 
     donation_time=?, volume_ml=?
@@ -460,7 +460,7 @@ WHERE donation_id=?</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#9 DELETE</div>
+                        <div class="query-badge">#9 DELETE - Purpose: Remove a donation record</div>
                         <div class="query-sql">DELETE FROM donation
 WHERE donation_id=?</div>
                     </div>

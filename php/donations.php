@@ -1,273 +1,597 @@
 <?php
 require_once 'db_connect.php';
 
-// Fetch donations with donor, camp, and location info
-$sql = "SELECT d.donation_id, donor.full_name, camp.title AS camp_title, location.name AS location_name, d.volume_ml, d.donation_time
-FROM donation d
-JOIN donor ON d.donor_id = donor.donor_id
-JOIN camp ON d.camp_id = camp.camp_id
-JOIN location ON camp.location_id = location.location_id
-ORDER BY d.donation_time DESC";
-$donations = $pdo->query($sql)->fetchAll();
+// Handle Insert
+if (isset($_POST['add'])) {
+    if (isset($_POST['donor_id']) && isset($_POST['camp_id']) && isset($_POST['donation_time']) && isset($_POST['volume_ml'])) {
+        $stmt = $pdo->prepare("INSERT INTO donation (donor_id, camp_id, donation_time, volume_ml, created_at) VALUES (?, ?, ?, ?, NOW())");
+        $stmt->execute([$_POST['donor_id'], $_POST['camp_id'], $_POST['donation_time'], $_POST['volume_ml']]);
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit();
+    }
+}
 
-// Feature: Donations per camp (analytics/statistics)
-$campStats = $pdo->query("SELECT camp.title, COUNT(*) AS total_donations FROM donation d JOIN camp ON d.camp_id = camp.camp_id GROUP BY camp.title")->fetchAll();
+// Handle Update
+if (isset($_POST['update'])) {
+    if (isset($_POST['donation_id']) && isset($_POST['donor_id']) && isset($_POST['camp_id']) && isset($_POST['donation_time']) && isset($_POST['volume_ml'])) {
+        $stmt = $pdo->prepare("UPDATE donation SET donor_id=?, camp_id=?, donation_time=?, volume_ml=? WHERE donation_id=?");
+        $stmt->execute([$_POST['donor_id'], $_POST['camp_id'], $_POST['donation_time'], $_POST['volume_ml'], $_POST['donation_id']]);
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit();
+    }
+}
 
-// Feature: Donors with more than one donation (advanced analytics)
-$multiDonors = $pdo->query("SELECT full_name FROM donor WHERE donor_id IN (SELECT donor_id FROM donation GROUP BY donor_id HAVING COUNT(*) > 1)")->fetchAll();
+// Handle Delete
+if (isset($_POST['delete'])) {
+    $stmt = $pdo->prepare("DELETE FROM donation WHERE donation_id=?");
+    $stmt->execute([$_POST['donation_id']]);
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit();
+}
 
-// Fetch donors and camps for add form
-$donors = $pdo->query("SELECT donor_id, full_name FROM donor ORDER BY full_name")->fetchAll();
+// Handle sorting
+$orderBy = "d.donation_time DESC";
+if (isset($_GET['sort'])) {
+    switch ($_GET['sort']) {
+        case 'date_asc': $orderBy = "d.donation_time ASC"; break;
+        case 'date_desc': $orderBy = "d.donation_time DESC"; break;
+        case 'volume_asc': $orderBy = "d.volume_ml ASC"; break;
+        case 'volume_desc': $orderBy = "d.volume_ml DESC"; break;
+    }
+}
+
+// Query 1: List all donations with JOIN (donor name, camp title, location)
+$stmt = $pdo->query("
+    SELECT d.donation_id, d.donation_time, d.volume_ml, d.created_at,
+           donor.full_name, donor.blood_group,
+           camp.title as camp_title,
+           location.name as location_name
+    FROM donation d
+    JOIN donor ON d.donor_id = donor.donor_id
+    JOIN camp ON d.camp_id = camp.camp_id
+    JOIN location ON camp.location_id = location.location_id
+    ORDER BY $orderBy
+");
+$donations = $stmt->fetchAll();
+
+// Query 2: Total volume donated (AGGREGATE)
+$total_volume = $pdo->query("SELECT COALESCE(SUM(volume_ml), 0) as total FROM donation")->fetch()['total'];
+
+// Query 3: Donations by blood group (JOIN + GROUP BY)
+$by_blood_group = $pdo->query("
+    SELECT donor.blood_group, COUNT(d.donation_id) as total_donations, SUM(d.volume_ml) as total_volume
+    FROM donation d
+    JOIN donor ON d.donor_id = donor.donor_id
+    GROUP BY donor.blood_group
+    ORDER BY total_donations DESC
+")->fetchAll();
+
+// Query 4: Recent donations (last 30 days)
+$recent_donations = $pdo->query("
+    SELECT COUNT(*) as count
+    FROM donation
+    WHERE donation_time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+")->fetch()['count'];
+
+// Query 5: Top 5 donors by donation count
+$top_donors = $pdo->query("
+    SELECT donor.full_name, donor.blood_group, COUNT(d.donation_id) as donation_count, SUM(d.volume_ml) as total_donated
+    FROM donor
+    JOIN donation d ON donor.donor_id = d.donor_id
+    GROUP BY donor.donor_id, donor.full_name, donor.blood_group
+    HAVING donation_count >= 1
+    ORDER BY donation_count DESC, total_donated DESC
+    LIMIT 5
+")->fetchAll();
+
+// Query 6: Donations per camp
+$by_camp = $pdo->query("
+    SELECT camp.title, location.name as location_name, COUNT(d.donation_id) as total_donations, COALESCE(SUM(d.volume_ml), 0) as total_volume
+    FROM camp
+    LEFT JOIN donation d ON camp.camp_id = d.camp_id
+    LEFT JOIN location ON camp.location_id = location.location_id
+    GROUP BY camp.camp_id, camp.title, location.name
+    ORDER BY total_donations DESC
+")->fetchAll();
+
+// Get lists for dropdowns
+$donors = $pdo->query("SELECT donor_id, full_name, blood_group FROM donor ORDER BY full_name")->fetchAll();
 $camps = $pdo->query("SELECT camp_id, title FROM camp ORDER BY title")->fetchAll();
 
 include '_header.php';
 ?>
-<div class="row g-4 align-items-start">
-    <div class="col-12 col-lg-8">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body">
-                <div class="d-flex align-items-center justify-content-between mb-3">
-                    <h3 class="mb-0 fw-bold">Donations</h3>
-                    <a href="../index.html" class="btn btn-outline-secondary fw-bold"><i class="bi bi-house"></i> Go to Home</a>
-                </div>
-                
-                <div class="mb-3 d-flex gap-2 flex-wrap align-items-center">
-                    <button id="showCampStats" class="btn btn-outline-primary btn-sm fw-semibold" type="button">Donations per Camp</button>
-                    <button id="showMultiDonors" class="btn btn-outline-primary btn-sm fw-semibold" type="button">Donors with More Than One Donation</button>
-                    
-                    <div class="dropdown ms-auto" style="position:relative;">
-                        <button id="sortByBtn" class="btn btn-outline-secondary fw-semibold" type="button" style="border-radius:8px;">
-                            Sort by <i class="bi bi-chevron-down"></i>
-                        </button>
-                        <div id="sortMenu" class="dropdown-menu" style="display:none;position:absolute;top:110%;right:0;min-width:220px;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(16,19,26,0.15);padding:8px 0;z-index:1000;border:1px solid #e5e7eb;">
-                            <button class="dropdown-item px-4 py-2" data-sort="date_asc" style="background:none;border:none;width:100%;text-align:left;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">Date Ascending</button>
-                            <button class="dropdown-item px-4 py-2" data-sort="date_desc" style="background:none;border:none;width:100%;text-align:left;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">Date Descending</button>
-                            <button class="dropdown-item px-4 py-2" data-sort="volume_asc" style="background:none;border:none;width:100%;text-align:left;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">Volume Ascending</button>
-                            <button class="dropdown-item px-4 py-2" data-sort="volume_desc" style="background:none;border:none;width:100%;text-align:left;cursor:pointer;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">Volume Descending</button>
-                        </div>
-                    </div>
-                </div>
 
-                <div id="mainContentPanel">
-                    <div class="table-responsive">
-                        <table class="table align-middle mb-0">
-                            <thead class="table-primary">
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Donor Name</th>
-                                    <th>Camp Name</th>
-                                    <th>Location</th>
-                                    <th>Volume (ml)</th>
-                                    <th>Date</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            <?php 
-                            if (count($donations) === 0) {
-                                echo '<tr><td colspan="6" class="text-center">No data available</td></tr>';
-                            } else {
-                                foreach ($donations as $row) {
-                                    echo '<tr>';
-                                    echo '<td>' . $row['donation_id'] . '</td>';
-                                    echo '<td>' . htmlspecialchars($row['full_name']) . '</td>';
-                                    echo '<td>' . htmlspecialchars($row['camp_title']) . '</td>';
-                                    echo '<td>' . htmlspecialchars($row['location_name']) . '</td>';
-                                    echo '<td>' . $row['volume_ml'] . '</td>';
-                                    echo '<td>' . date('Y-m-d', strtotime($row['donation_time'])) . '</td>';
-                                    echo '</tr>';
-                                }
-                            }
-                            ?>
-                            </tbody>
-                        </table>
-                    </div>
+<style>
+.stat-box {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 20px;
+    color: white;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    text-align: center;
+}
+.stat-box h3 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+.stat-box p {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    margin: 0;
+}
+.query-box {
+    background: #0d1117;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+    color: white;
+}
+.query-badge {
+    background: #667eea;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: inline-block;
+    margin-bottom: 8px;
+}
+.query-sql {
+    background: #1a1f2e;
+    color: #e6edf3;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    line-height: 1.5;
+    white-space: pre;
+    border-left: 3px solid #667eea;
+}
+.section-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+.section-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+</style>
+
+<div class="container-fluid py-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="fw-bold mb-1"><i class="bi bi-droplet-fill text-danger"></i> Blood Donations</h2>
+                    <p class="text-muted mb-0">Manage and track all blood donation records</p>
                 </div>
+                <a href="../index.html" class="btn btn-outline-secondary"><i class="bi bi-house"></i> Home</a>
             </div>
         </div>
     </div>
-    
-    <div class="col-12 col-lg-4">
-        <div style="background:#181f2a;border-radius:20px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.3);position:sticky;top:20px;">
-            <div class="d-flex align-items-center mb-4" style="gap:10px;">
-                <i class="bi bi-terminal" style="color:#60a5fa;font-size:1.5rem;"></i>
-                <span style="color:#fff;font-weight:700;font-size:1.25rem;letter-spacing:0.5px;">SQL Queries</span>
-            </div>
+
+    <div class="row g-4">
+        <!-- Left Column - Main Content -->
+        <div class="col-12 col-lg-8">
             
-            <!-- Query #1: JOIN -->
-            <div class="mb-4">
-                <span style="background:#2563eb;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#1 JOIN</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #2563eb;">
-                    <div style="color:#93c5fd;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Main donation list with relations</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">SELECT d.donation_id, donor.full_name, 
-       camp.title AS camp_title, 
-       location.name AS location_name, 
-       d.volume_ml, d.donation_time
+            <!-- Statistics Cards -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <h3><?php echo number_format(count($donations)); ?></h3>
+                        <p>Total Donations</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                        <h3><?php echo number_format($total_volume / 1000, 1); ?>L</h3>
+                        <p>Total Volume</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                        <h3><?php echo number_format($recent_donations); ?></h3>
+                        <p>Last 30 Days</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-box" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                        <h3><?php echo count($donations) > 0 ? number_format($total_volume / count($donations)) : 0; ?> ml</h3>
+                        <p>Avg Volume</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Button -->
+            <div class="mb-3">
+                <button type="button" class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#addModal">
+                    <i class="bi bi-plus-circle"></i> Add Donation
+                </button>
+            </div>
+
+            <!-- Donations Table -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="bi bi-table text-primary"></i>
+                    All Donations
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-primary">
+                            <tr>
+                                <th>ID</th>
+                                <th>Donor Name</th>
+                                <th>Blood Group</th>
+                                <th>Camp</th>
+                                <th>Location</th>
+                                <th>Volume (ml)</th>
+                                <th>Donation Date</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php if (count($donations) === 0): ?>
+                            <tr><td colspan="8" class="text-center text-muted">No donations found</td></tr>
+                        <?php else: ?>
+                            <?php foreach ($donations as $don): ?>
+                            <tr>
+                                <td><?php echo $don['donation_id']; ?></td>
+                                <td class="fw-semibold"><?php echo htmlspecialchars($don['full_name']); ?></td>
+                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($don['blood_group']); ?></span></td>
+                                <td><?php echo htmlspecialchars($don['camp_title']); ?></td>
+                                <td><?php echo htmlspecialchars($don['location_name']); ?></td>
+                                <td><strong><?php echo number_format($don['volume_ml']); ?></strong></td>
+                                <td><?php echo date('Y-m-d H:i', strtotime($don['donation_time'])); ?></td>
+                                <td>
+                                    <button type="button" class="btn btn-warning btn-sm" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#editModal"
+                                            data-id="<?php echo $don['donation_id']; ?>"
+                                            data-donor="<?php echo $don['full_name']; ?>"
+                                            data-time="<?php echo date('Y-m-d\TH:i', strtotime($don['donation_time'])); ?>"
+                                            data-volume="<?php echo $don['volume_ml']; ?>">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form method="post" class="d-inline">
+                                        <input type="hidden" name="donation_id" value="<?php echo $don['donation_id']; ?>">
+                                        <button type="submit" name="delete" class="btn btn-danger btn-sm" 
+                                                onclick="return confirm('Delete this donation?')">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Donations by Blood Group -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="bi bi-pie-chart-fill text-success"></i>
+                    Donations by Blood Group
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Blood Group</th>
+                                <th>Total Donations</th>
+                                <th>Total Volume</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($by_blood_group as $bg): ?>
+                            <tr>
+                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($bg['blood_group']); ?></span></td>
+                                <td><?php echo $bg['total_donations']; ?></td>
+                                <td><?php echo number_format($bg['total_volume']); ?> ml</td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Top Donors -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="bi bi-trophy-fill text-warning"></i>
+                    Top 5 Donors
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>Donor Name</th>
+                                <th>Blood Group</th>
+                                <th>Donations</th>
+                                <th>Total Volume</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php $rank = 1; foreach ($top_donors as $donor): ?>
+                            <tr>
+                                <td>
+                                    <?php if($rank <= 3): ?>
+                                        <span class="badge bg-warning text-dark">🏆 #<?php echo $rank; ?></span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">#<?php echo $rank; ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="fw-semibold"><?php echo htmlspecialchars($donor['full_name']); ?></td>
+                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($donor['blood_group']); ?></span></td>
+                                <td><?php echo $donor['donation_count']; ?> times</td>
+                                <td><?php echo number_format($donor['total_donated']); ?> ml</td>
+                            </tr>
+                        <?php $rank++; endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Donations per Camp -->
+            <div class="section-card">
+                <div class="section-title">
+                    <i class="bi bi-bar-chart-fill text-info"></i>
+                    Donations per Camp
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Camp Name</th>
+                                <th>Location</th>
+                                <th>Total Donations</th>
+                                <th>Total Volume</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($by_camp as $camp): ?>
+                            <tr>
+                                <td class="fw-semibold"><?php echo htmlspecialchars($camp['title']); ?></td>
+                                <td><?php echo htmlspecialchars($camp['location_name']); ?></td>
+                                <td><span class="badge bg-primary"><?php echo $camp['total_donations']; ?></span></td>
+                                <td><?php echo number_format($camp['total_volume']); ?> ml</td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column - SQL Queries -->
+        <div class="col-12 col-lg-4">
+            <div style="position: sticky; top: 20px;">
+                
+                <!-- Query Box -->
+                <div class="query-box">
+                    <div class="d-flex align-items-center mb-3">
+                        <i class="bi bi-code-square" style="font-size: 1.5rem; color: #60a5fa;"></i>
+                        <span style="margin-left: 10px; font-weight: 700; font-size: 1.2rem;">SQL Queries</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="query-badge">#1 Multi-table JOIN - Purpose: Display all donations with complete details</div>
+                        <div class="query-sql">SELECT d.donation_id, d.donation_time,
+       d.volume_ml, donor.full_name,
+       donor.blood_group, camp.title,
+       location.name as location_name
 FROM donation d
 JOIN donor ON d.donor_id = donor.donor_id
 JOIN camp ON d.camp_id = camp.camp_id
-JOIN location ON camp.location_id = location.location_id
-ORDER BY d.donation_time DESC</pre>
-                </div>
-            </div>
+JOIN location 
+  ON camp.location_id = location.location_id
+ORDER BY d.donation_time DESC</div>
+                    </div>
 
-            <!-- Query #2: AGGREGATE -->
-            <div class="mb-4">
-                <span style="background:#10b981;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#2 AGGREGATE</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #10b981;">
-                    <div style="color:#6ee7b7;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Total volume donated</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">SELECT SUM(volume_ml) AS total_volume 
-FROM donation</pre>
-                </div>
-            </div>
+                    <div class="mb-3">
+                        <div class="query-badge">#2 AGGREGATE (SUM) - Purpose: Calculate total blood volume donated</div>
+                        <div class="query-sql">SELECT SUM(volume_ml) as total
+FROM donation</div>
+                    </div>
 
-            <!-- Query #3: GROUP BY -->
-            <div class="mb-4">
-                <span style="background:#f59e0b;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#3 GROUP BY</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #f59e0b;">
-                    <div style="color:#fcd34d;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Donations per camp</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">SELECT camp.title, COUNT(*) AS total_donations
+                    <div class="mb-3">
+                        <div class="query-badge">#3 GROUP BY + JOIN - Purpose: Analyze donations by blood group</div>
+                        <div class="query-sql">SELECT donor.blood_group,
+       COUNT(d.donation_id) as total_donations,
+       SUM(d.volume_ml) as total_volume
 FROM donation d
-JOIN camp ON d.camp_id = camp.camp_id
-GROUP BY camp.title</pre>
-                </div>
-            </div>
+JOIN donor ON d.donor_id = donor.donor_id
+GROUP BY donor.blood_group
+ORDER BY total_donations DESC</div>
+                    </div>
 
-            <!-- Query #4: SUBQUERY -->
-            <div class="mb-4">
-                <span style="background:#8b5cf6;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#4 SUBQUERY</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #8b5cf6;">
-                    <div style="color:#c4b5fd;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Multi-donation donors</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">SELECT full_name
+                    <div class="mb-3">
+                        <div class="query-badge">#4 DATE Functions - Purpose: Count recent donations (last 30 days)</div>
+                        <div class="query-sql">SELECT COUNT(*) as count
+FROM donation
+WHERE donation_time >= 
+  DATE_SUB(CURDATE(), INTERVAL 30 DAY)</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="query-badge">#5 HAVING + LIMIT - Purpose: Find top 5 most active donors</div>
+                        <div class="query-sql">SELECT donor.full_name, 
+       COUNT(d.donation_id) as donation_count,
+       SUM(d.volume_ml) as total_donated
 FROM donor
-WHERE donor_id IN (
-    SELECT donor_id FROM donation 
-    GROUP BY donor_id 
-    HAVING COUNT(*) > 1
-)</pre>
-                </div>
-            </div>
+JOIN donation d 
+  ON donor.donor_id = d.donor_id
+GROUP BY donor.donor_id
+HAVING donation_count >= 1
+ORDER BY donation_count DESC
+LIMIT 5</div>
+                    </div>
 
-            <!-- Query #5: Sort Date Ascending -->
-            <div class="mb-4">
-                <span style="background:#ec4899;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#5 SORT ASC</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #ec4899;">
-                    <div style="color:#f9a8d4;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Date ascending</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">ORDER BY d.donation_time ASC</pre>
-                </div>
-            </div>
+                    <div class="mb-3">
+                        <div class="query-badge">#6 LEFT JOIN + GROUP BY - Purpose: Show camp performance statistics</div>
+                        <div class="query-sql">SELECT camp.title, location.name,
+       COUNT(d.donation_id) as total_donations,
+       SUM(d.volume_ml) as total_volume
+FROM camp
+LEFT JOIN donation d 
+  ON camp.camp_id = d.camp_id
+LEFT JOIN location 
+  ON camp.location_id = location.location_id
+GROUP BY camp.camp_id
+ORDER BY total_donations DESC</div>
+                    </div>
 
-            <!-- Query #6: Sort Date Descending -->
-            <div class="mb-4">
-                <span style="background:#06b6d4;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#6 SORT DESC</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #06b6d4;">
-                    <div style="color:#67e8f9;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Date descending</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">ORDER BY d.donation_time DESC</pre>
-                </div>
-            </div>
+                    <div class="mb-3">
+                        <div class="query-badge">#7 INSERT- Purpose: Add new donation record</div>
+                        <div class="query-sql">INSERT INTO donation 
+  (donor_id, camp_id, donation_time, 
+   volume_ml, created_at)
+VALUES (?, ?, ?, ?, NOW())</div>
+                    </div>
 
-            <!-- Query #7: Sort Volume Ascending -->
-            <div class="mb-4">
-                <span style="background:#14b8a6;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#7 SORT VOL ASC</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #14b8a6;">
-                    <div style="color:#5eead4;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Volume ascending</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">ORDER BY d.volume_ml ASC</pre>
-                </div>
-            </div>
+                    <div class="mb-3">
+                        <div class="query-badge">#8 UPDATE- Purpose: Update existing donation details</div>
+                        <div class="query-sql">UPDATE donation
+SET donor_id=?, camp_id=?, 
+    donation_time=?, volume_ml=?
+WHERE donation_id=?</div>
+                    </div>
 
-            <!-- Query #8: Sort Volume Descending -->
-            <div class="mb-3">
-                <span style="background:#f97316;color:#fff;font-weight:600;font-size:0.85rem;padding:4px 12px;border-radius:6px;display:inline-block;margin-bottom:10px;">#8 SORT VOL DESC</span>
-                <div style="background:#232b3a;border-radius:12px;padding:16px;border-left:3px solid #f97316;">
-                    <div style="color:#fdba74;font-size:0.9rem;font-weight:600;margin-bottom:8px;">Volume descending</div>
-                    <pre style="background:#1a2332;color:#e0e7ef;font-family:'Courier New',monospace;font-size:12px;padding:12px;margin:0;border-radius:8px;overflow-x:auto;line-height:1.5;">ORDER BY d.volume_ml DESC</pre>
+                    <div class="mb-3">
+                        <div class="query-badge">#9 DELETE- Purpose: Remove donation record from system</div>
+                        <div class="query-sql">DELETE FROM donation
+WHERE donation_id=?</div>
+                    </div>
+
                 </div>
+
             </div>
         </div>
     </div>
 </div>
 
+<!-- Add Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Donation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Donor</label>
+                        <select name="donor_id" class="form-select" required>
+                            <option value="">Select Donor</option>
+                            <?php foreach ($donors as $donor): ?>
+                                <option value="<?php echo $donor['donor_id']; ?>">
+                                    <?php echo htmlspecialchars($donor['full_name']); ?> (<?php echo $donor['blood_group']; ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Camp</label>
+                        <select name="camp_id" class="form-select" required>
+                            <option value="">Select Camp</option>
+                            <?php foreach ($camps as $camp): ?>
+                                <option value="<?php echo $camp['camp_id']; ?>">
+                                    <?php echo htmlspecialchars($camp['title']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Donation Date & Time</label>
+                        <input type="datetime-local" name="donation_time" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Volume (ml)</label>
+                        <input type="number" name="volume_ml" class="form-control" min="1" max="1000" required placeholder="e.g. 450">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" name="add" class="btn btn-primary">Add Donation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Donation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="donation_id" id="edit_donation_id">
+                    <div class="mb-3">
+                        <label class="form-label">Donor</label>
+                        <select name="donor_id" id="edit_donor_id" class="form-select" required>
+                            <?php foreach ($donors as $donor): ?>
+                                <option value="<?php echo $donor['donor_id']; ?>">
+                                    <?php echo htmlspecialchars($donor['full_name']); ?> (<?php echo $donor['blood_group']; ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Camp</label>
+                        <select name="camp_id" id="edit_camp_id" class="form-select" required>
+                            <?php foreach ($camps as $camp): ?>
+                                <option value="<?php echo $camp['camp_id']; ?>">
+                                    <?php echo htmlspecialchars($camp['title']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Donation Date & Time</label>
+                        <input type="datetime-local" name="donation_time" id="edit_donation_time" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Volume (ml)</label>
+                        <input type="number" name="volume_ml" id="edit_volume_ml" class="form-control" min="1" max="1000" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" name="update" class="btn btn-warning">Update Donation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
-// Panels HTML as JS templates
-const campStatsHTML = `
-<div class="card border-0 shadow-sm mb-3">
-    <div class="card-body">
-        <div class="d-flex align-items-center mb-3">
-            <h5 class="fw-semibold mb-0" style="color:#2563eb;">Donations per Camp (GROUP BY)</h5>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-bordered table-sm mb-0" style="background:#f8fafc;">
-                <thead class="table-light">
-                    <tr>
-                        <th>Camp Name</th>
-                        <th>Total Donations</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (count($campStats) === 0): ?>
-                        <tr><td colspan="2" class="text-center">No data available</td></tr>
-                    <?php else: foreach ($campStats as $camp): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($camp['title']); ?></td>
-                            <td><?php echo $camp['total_donations']; ?></td>
-                        </tr>
-                    <?php endforeach; endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>`;
-
-const multiDonorsHTML = `
-<div class="card border-0 shadow-sm mb-3">
-    <div class="card-body">
-        <div class="d-flex align-items-center mb-3">
-            <h5 class="fw-semibold mb-0" style="color:#2563eb;">Donors with More Than One Donation (SUBQUERY)</h5>
-        </div>
-        <ul class="list-group list-group-flush">
-            <?php if (count($multiDonors) === 0): ?>
-                <li class="list-group-item text-center" style="background:#f8fafc;">No data available</li>
-            <?php else: foreach ($multiDonors as $donor): ?>
-                <li class="list-group-item" style="background:#f8fafc;"><?php echo htmlspecialchars($donor['full_name']); ?></li>
-            <?php endforeach; endif; ?>
-        </ul>
-    </div>
-</div>`;
-
-const mainContentPanel = document.getElementById('mainContentPanel');
-
-document.getElementById('showCampStats').addEventListener('click', function() {
-    mainContentPanel.innerHTML = campStatsHTML;
-});
-
-document.getElementById('showMultiDonors').addEventListener('click', function() {
-    mainContentPanel.innerHTML = multiDonorsHTML;
-});
-
-// Sort By Dropdown Functionality
+// Populate edit modal with data
 document.addEventListener('DOMContentLoaded', function() {
-    var sortByBtn = document.getElementById('sortByBtn');
-    var sortMenu = document.getElementById('sortMenu');
-    
-    if (sortByBtn && sortMenu) {
-        sortByBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            sortMenu.style.display = sortMenu.style.display === 'block' ? 'none' : 'block';
-        });
-        
-        // Hide dropdown when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!sortMenu.contains(e.target) && e.target !== sortByBtn) {
-                sortMenu.style.display = 'none';
-            }
-        });
-        
-        // Handle sort option clicks
-        var sortOptions = sortMenu.querySelectorAll('[data-sort]');
-        sortOptions.forEach(function(option) {
-            option.addEventListener('click', function() {
-                var sortType = this.getAttribute('data-sort');
-                window.location.href = 'donations.php?sort=' + sortType;
-            });
+    var editModal = document.getElementById('editModal');
+    if (editModal) {
+        editModal.addEventListener('show.bs.modal', function(event) {
+            var button = event.relatedTarget;
+            document.getElementById('edit_donation_id').value = button.getAttribute('data-id');
+            document.getElementById('edit_donation_time').value = button.getAttribute('data-time');
+            document.getElementById('edit_volume_ml').value = button.getAttribute('data-volume');
         });
     }
 });
