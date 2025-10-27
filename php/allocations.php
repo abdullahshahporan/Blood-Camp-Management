@@ -262,12 +262,12 @@ include '_header.php';
             </div>
 
             <!-- Pending Requests Alert -->
-            <?php if (count($pending_requests) > 0): ?>
+          <!-- <! <?php if (count($pending_requests) > 0): ?>
             <div class="pending-alert">
                 <h6 class="fw-bold mb-2"><i class="bi bi-clock-history"></i> Pending Requests (<?php echo count($pending_requests); ?>)</h6>
                 <p class="mb-0 small">These requests are waiting for allocation or need more units.</p>
             </div>
-            <?php endif; ?>
+            <?php endif; ?>*-->
 
             <!-- All Allocations Table -->
             <div class="section-card">
@@ -534,7 +534,7 @@ GROUP BY l.location_id, l.name
 ORDER BY total DESC</div>
                     </div>
 
-                    <div class="mb-3">
+                   <!-- <div class="mb-3">
                         <div class="query-badge">#8 SUBQUERY (Pending)</div>
                         <div class="query-title-text">Purpose: Find pending requests</div>
                         <div class="query-sql">SELECT r.*
@@ -546,10 +546,10 @@ WHERE r.request_id NOT IN (
 OR (SELECT COUNT(*) FROM allocation 
     WHERE request_id = r.request_id) 
    < r.units_requested</div>
-                    </div>
+                    </div>-->
 
                     <div class="mb-3">
-                        <div class="query-badge">#9 INSERT + UPDATE</div>
+                        <div class="query-badge">#8 INSERT + UPDATE</div>
                         <div class="query-title-text">Purpose: Allocate unit & update status</div>
                         <div class="query-sql">-- Update unit status
 UPDATE blood_unit 
@@ -563,7 +563,7 @@ VALUES (?, ?, NOW())</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#10 DELETE + UPDATE</div>
+                        <div class="query-badge">#9 DELETE + UPDATE</div>
                         <div class="query-title-text">Purpose: Remove allocation & restore unit</div>
                         <div class="query-sql">-- Delete allocation
 DELETE FROM allocation 

@@ -3,9 +3,9 @@ require_once 'db_connect.php';
 
 // Handle Insert
 if (isset($_POST['add'])) {
-    if (isset($_POST['donor_id']) && isset($_POST['camp_id']) && isset($_POST['donation_time']) && isset($_POST['volume_ml'])) {
-        $stmt = $pdo->prepare("INSERT INTO donation (donor_id, camp_id, donation_time, volume_ml, created_at) VALUES (?, ?, ?, ?, NOW())");
-        $stmt->execute([$_POST['donor_id'], $_POST['camp_id'], $_POST['donation_time'], $_POST['volume_ml']]);
+    if (isset($_POST['unit_id']) && isset($_POST['donation_id']) && isset($_POST['location_id']) && isset($_POST['status']) && isset($_POST['expiry_date'])) {
+        $stmt = $pdo->prepare("INSERT INTO blood_unit (unit_id, donation_id, location_id, status, expiry_date, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+        $stmt->execute([$_POST['unit_id'], $_POST['donation_id'], $_POST['location_id'], $_POST['status'], $_POST['expiry_date']]);
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit();
     }
@@ -13,9 +13,9 @@ if (isset($_POST['add'])) {
 
 // Handle Update
 if (isset($_POST['update'])) {
-    if (isset($_POST['donation_id']) && isset($_POST['donor_id']) && isset($_POST['camp_id']) && isset($_POST['donation_time']) && isset($_POST['volume_ml'])) {
-        $stmt = $pdo->prepare("UPDATE donation SET donor_id=?, camp_id=?, donation_time=?, volume_ml=? WHERE donation_id=?");
-        $stmt->execute([$_POST['donor_id'], $_POST['camp_id'], $_POST['donation_time'], $_POST['volume_ml'], $_POST['donation_id']]);
+    if (isset($_POST['unit_id']) && isset($_POST['donation_id']) && isset($_POST['location_id']) && isset($_POST['status']) && isset($_POST['expiry_date'])) {
+        $stmt = $pdo->prepare("UPDATE blood_unit SET donation_id=?, location_id=?, status=?, expiry_date=? WHERE unit_id=?");
+        $stmt->execute([$_POST['donation_id'], $_POST['location_id'], $_POST['status'], $_POST['expiry_date'], $_POST['unit_id']]);
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit();
     }
@@ -23,69 +23,87 @@ if (isset($_POST['update'])) {
 
 // Handle Delete
 if (isset($_POST['delete'])) {
-    $stmt = $pdo->prepare("DELETE FROM donation WHERE donation_id=?");
-    $stmt->execute([$_POST['donation_id']]);
+    $stmt = $pdo->prepare("DELETE FROM blood_unit WHERE unit_id=?");
+    $stmt->execute([$_POST['unit_id']]);
     header('Location: ' . $_SERVER['PHP_SELF']);
     exit();
 }
 
-// Query 1: List all donations with JOIN (donor name, camp title, location)
+// Query 1: List all blood units with JOIN
 $stmt = $pdo->query("
-    SELECT d.donation_id, d.donation_time, d.volume_ml, d.created_at,
-           donor.full_name, donor.blood_group,
-           camp.title as camp_title,
-           location.name as location_name
-    FROM donation d
-    JOIN donor ON d.donor_id = donor.donor_id
-    JOIN camp ON d.camp_id = camp.camp_id
-    JOIN location ON camp.location_id = location.location_id
-    ORDER BY d.donation_time DESC
+    SELECT bu.unit_id, bu.status, bu.expiry_date, bu.created_at,
+           d.full_name as donor_name, d.blood_group,
+           l.name as location_name
+    FROM blood_unit bu
+    JOIN donation dn ON bu.donation_id = dn.donation_id
+    JOIN donor d ON dn.donor_id = d.donor_id
+    JOIN location l ON bu.location_id = l.location_id
+    ORDER BY bu.created_at DESC
 ");
-$donations = $stmt->fetchAll();
+$units = $stmt->fetchAll();
 
-// Query 2: Total volume donated (AGGREGATE)
-$total_volume = $pdo->query("SELECT COALESCE(SUM(volume_ml), 0) as total FROM donation")->fetch()['total'];
+// Query 2: Count by status (GROUP BY)
+$status_count = $pdo->query("
+    SELECT status, COUNT(*) as total 
+    FROM blood_unit 
+    GROUP BY status
+")->fetchAll();
 
-// Query 3: Donations by blood group (JOIN + GROUP BY)
+// Query 3: Total count
+$total_count = $pdo->query("SELECT COUNT(*) FROM blood_unit")->fetchColumn();
+
+// Query 4: Expiring soon (next 30 days)
+$expiring_units = $pdo->query("
+    SELECT bu.unit_id, d.full_name, d.blood_group, bu.expiry_date, bu.status, l.name as location_name
+    FROM blood_unit bu
+    JOIN donation dn ON bu.donation_id = dn.donation_id
+    JOIN donor d ON dn.donor_id = d.donor_id
+    JOIN location l ON bu.location_id = l.location_id
+    WHERE bu.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+    AND bu.status = 'Available'
+    ORDER BY bu.expiry_date ASC
+")->fetchAll();
+
+// Query 5: Units by blood group (JOIN + GROUP BY)
 $by_blood_group = $pdo->query("
-    SELECT donor.blood_group, COUNT(d.donation_id) as total_donations, SUM(d.volume_ml) as total_volume
-    FROM donation d
-    JOIN donor ON d.donor_id = donor.donor_id
-    GROUP BY donor.blood_group
-    ORDER BY total_donations DESC
+    SELECT d.blood_group, 
+           COUNT(CASE WHEN bu.status = 'Available' THEN 1 END) as available,
+           COUNT(CASE WHEN bu.status = 'Reserved' THEN 1 END) as reserved,
+           COUNT(CASE WHEN bu.status = 'Expired' THEN 1 END) as expired
+    FROM blood_unit bu
+    JOIN donation dn ON bu.donation_id = dn.donation_id
+    JOIN donor d ON dn.donor_id = d.donor_id
+    GROUP BY d.blood_group
+    ORDER BY d.blood_group
 ")->fetchAll();
 
-// Query 4: Recent donations (last 30 days) - SUBQUERY + DATE
-$recent_donations = $pdo->query("
-    SELECT COUNT(*) as count
-    FROM donation
-    WHERE donation_time >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-")->fetch()['count'];
-
-// Query 5: Top 5 donors by donation count (JOIN + GROUP BY + HAVING + LIMIT)
-$top_donors = $pdo->query("
-    SELECT donor.full_name, donor.blood_group, COUNT(d.donation_id) as donation_count, SUM(d.volume_ml) as total_donated
-    FROM donor
-    JOIN donation d ON donor.donor_id = d.donor_id
-    GROUP BY donor.donor_id, donor.full_name, donor.blood_group
-    HAVING donation_count >= 1
-    ORDER BY donation_count DESC, total_donated DESC
-    LIMIT 5
-")->fetchAll();
-
-// Query 6: Donations per camp (JOIN + GROUP BY + AGGREGATE)
-$by_camp = $pdo->query("
-    SELECT camp.title, location.name as location_name, COUNT(d.donation_id) as total_donations, COALESCE(SUM(d.volume_ml), 0) as total_volume
-    FROM camp
-    LEFT JOIN donation d ON camp.camp_id = d.camp_id
-    LEFT JOIN location ON camp.location_id = location.location_id
-    GROUP BY camp.camp_id, camp.title, location.name
-    ORDER BY total_donations DESC
+// Query 6: Units by location (JOIN + GROUP BY)
+$by_location = $pdo->query("
+    SELECT l.name as location_name,
+           COUNT(CASE WHEN bu.status = 'Available' THEN 1 END) as available,
+           COUNT(CASE WHEN bu.status = 'Reserved' THEN 1 END) as reserved,
+           COUNT(CASE WHEN bu.status = 'Expired' THEN 1 END) as expired
+    FROM blood_unit bu
+    JOIN location l ON bu.location_id = l.location_id
+    GROUP BY l.location_id, l.name
+    ORDER BY available DESC
 ")->fetchAll();
 
 // Get lists for dropdowns
-$donors = $pdo->query("SELECT donor_id, full_name, blood_group FROM donor ORDER BY full_name")->fetchAll();
-$camps = $pdo->query("SELECT camp_id, title FROM camp ORDER BY title")->fetchAll();
+$donations = $pdo->query("
+    SELECT dn.donation_id, d.full_name, d.blood_group, dn.donation_time
+    FROM donation dn
+    JOIN donor d ON dn.donor_id = d.donor_id
+    ORDER BY dn.donation_time DESC
+")->fetchAll();
+
+$locations = $pdo->query("SELECT location_id, name FROM location ORDER BY name")->fetchAll();
+
+// Calculate statistics
+$stats = [];
+foreach ($status_count as $s) {
+    $stats[$s['status']] = $s['total'];
+}
 
 include '_header.php';
 ?>
@@ -98,6 +116,10 @@ include '_header.php';
     color: white;
     box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
     text-align: center;
+    transition: transform 0.3s ease;
+}
+.stat-box:hover {
+    transform: translateY(-5px);
 }
 .stat-box h3 {
     font-size: 2rem;
@@ -125,6 +147,13 @@ include '_header.php';
     font-weight: 600;
     display: inline-block;
     margin-bottom: 8px;
+}
+.query-title-text {
+    color: #93c5fd;
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-bottom: 6px;
+    font-style: italic;
 }
 .query-sql {
     background: #1a1f2e;
@@ -154,6 +183,16 @@ include '_header.php';
     align-items: center;
     gap: 8px;
 }
+.status-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.alert-warning {
+    background: linear-gradient(135deg, #fff8e1 0%, #ffe082 100%);
+    border-left: 4px solid #ffa726;
+}
 </style>
 
 <div class="container-fluid py-4">
@@ -161,8 +200,8 @@ include '_header.php';
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h2 class="fw-bold mb-1"><i class="bi bi-droplet-fill text-danger"></i> Blood Donations</h2>
-                    <p class="text-muted mb-0">Manage and track all blood donation records</p>
+                    <h2 class="fw-bold mb-1"><i class="bi bi-capsule text-warning"></i> Blood Units Inventory</h2>
+                    <p class="text-muted mb-0">Track and manage blood unit storage and status</p>
                 </div>
                 <a href="../index.html" class="btn btn-outline-secondary"><i class="bi bi-house"></i> Home</a>
             </div>
@@ -176,27 +215,27 @@ include '_header.php';
             <!-- Statistics Cards -->
             <div class="row g-3 mb-4">
                 <div class="col-md-3">
-                    <div class="stat-box" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                        <h3><?php echo number_format(count($donations)); ?></h3>
-                        <p>Total Donations</p>
+                    <div class="stat-box" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                        <h3><?php echo number_format($total_count); ?></h3>
+                        <p>Total Units</p>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="stat-box" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                        <h3><?php echo number_format($total_volume / 1000, 1); ?>L</h3>
-                        <p>Total Volume</p>
+                    <div class="stat-box" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);">
+                        <h3><?php echo number_format($stats['Available'] ?? 0); ?></h3>
+                        <p>Available</p>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="stat-box" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                        <h3><?php echo number_format($recent_donations); ?></h3>
-                        <p>Last 30 Days</p>
+                    <div class="stat-box" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                        <h3><?php echo number_format($stats['Reserved'] ?? 0); ?></h3>
+                        <p>Reserved</p>
                     </div>
                 </div>
                 <div class="col-md-3">
-                    <div class="stat-box" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
-                        <h3><?php echo count($donations) > 0 ? number_format($total_volume / count($donations)) : 0; ?> ml</h3>
-                        <p>Avg Volume</p>
+                    <div class="stat-box" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                        <h3><?php echo number_format($stats['Expired'] ?? 0); ?></h3>
+                        <p>Expired</p>
                     </div>
                 </div>
             </div>
@@ -204,62 +243,114 @@ include '_header.php';
             <!-- Add Button -->
             <div class="mb-3">
                 <button type="button" class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#addModal">
-                    <i class="bi bi-plus-circle"></i> Add Donation
+                    <i class="bi bi-plus-circle"></i> Add Blood Unit
                 </button>
             </div>
 
-            <!-- Donations Table -->
+            <!-- Expiring Soon Alert -->
+            <?php if (count($expiring_units) > 0): ?>
+            <div class="alert alert-warning mb-4">
+                <h6 class="fw-bold mb-2"><i class="bi bi-exclamation-triangle-fill"></i> Units Expiring Soon (Next 30 Days)</h6>
+                <p class="mb-2 small">These units need immediate attention:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Unit ID</th>
+                                <th>Blood Group</th>
+                                <th>Donor</th>
+                                <th>Location</th>
+                                <th>Expiry Date</th>
+                                <th>Days Left</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($expiring_units as $unit): 
+                                $daysLeft = ceil((strtotime($unit['expiry_date']) - time()) / (60 * 60 * 24));
+                            ?>
+                            <tr>
+                                <td><code><?php echo htmlspecialchars($unit['unit_id']); ?></code></td>
+                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($unit['blood_group']); ?></span></td>
+                                <td><?php echo htmlspecialchars($unit['full_name']); ?></td>
+                                <td><?php echo htmlspecialchars($unit['location_name']); ?></td>
+                                <td><?php echo date('M d, Y', strtotime($unit['expiry_date'])); ?></td>
+                                <td>
+                                    <span class="badge <?php echo $daysLeft <= 10 ? 'bg-danger' : 'bg-warning text-dark'; ?>">
+                                        <?php echo $daysLeft; ?> days
+                                    </span>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- All Blood Units Table -->
             <div class="section-card">
                 <div class="section-title">
                     <i class="bi bi-table text-primary"></i>
-                    All Donations
+                    All Blood Units (<?php echo count($units); ?>)
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-primary">
                             <tr>
-                                <th>ID</th>
-                                <th>Donor Name</th>
+                                <th>Unit ID</th>
                                 <th>Blood Group</th>
-                                <th>Camp</th>
+                                <th>Donor</th>
                                 <th>Location</th>
-                                <th>Volume (ml)</th>
-                                <th>Donation Date</th>
+                                <th>Status</th>
+                                <th>Expiry Date</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                        <?php if (count($donations) === 0): ?>
-                            <tr><td colspan="8" class="text-center text-muted">No donations found</td></tr>
+                        <?php if (count($units) === 0): ?>
+                            <tr><td colspan="7" class="text-center text-muted">No blood units found</td></tr>
                         <?php else: ?>
-                            <?php foreach ($donations as $don): ?>
-                            <tr>
-                                <td><?php echo $don['donation_id']; ?></td>
-                                <td class="fw-semibold"><?php echo htmlspecialchars($don['full_name']); ?></td>
-                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($don['blood_group']); ?></span></td>
-                                <td><?php echo htmlspecialchars($don['camp_title']); ?></td>
-                                <td><?php echo htmlspecialchars($don['location_name']); ?></td>
-                                <td><strong><?php echo number_format($don['volume_ml']); ?></strong></td>
-                                <td><?php echo date('Y-m-d H:i', strtotime($don['donation_time'])); ?></td>
-                                <td>
-                                    <button type="button" class="btn btn-warning btn-sm" 
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#editModal"
-                                            data-id="<?php echo $don['donation_id']; ?>"
-                                            data-donor="<?php echo $don['full_name']; ?>"
-                                            data-time="<?php echo date('Y-m-d\TH:i', strtotime($don['donation_time'])); ?>"
-                                            data-volume="<?php echo $don['volume_ml']; ?>">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                    <form method="post" class="d-inline">
-                                        <input type="hidden" name="donation_id" value="<?php echo $don['donation_id']; ?>">
-                                        <button type="submit" name="delete" class="btn btn-danger btn-sm" 
-                                                onclick="return confirm('Delete this donation?')">
-                                            <i class="bi bi-trash"></i>
+                            <?php foreach ($units as $unit): 
+                                $isExpired = strtotime($unit['expiry_date']) < time();
+                                $statusClass = $unit['status'] === 'Available' ? 'bg-success' : ($unit['status'] === 'Reserved' ? 'bg-warning text-dark' : 'bg-secondary');
+                            ?>
+                                <tr>
+                                    <td><code><?php echo htmlspecialchars($unit['unit_id']); ?></code></td>
+                                    <td><span class="badge bg-danger"><?php echo htmlspecialchars($unit['blood_group']); ?></span></td>
+                                    <td><?php echo htmlspecialchars($unit['donor_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($unit['location_name']); ?></td>
+                                    <td>
+                                        <span class="status-badge <?php echo $statusClass; ?>">
+                                            <?php echo $unit['status']; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php if ($isExpired): ?>
+                                            <span class="text-danger fw-bold">
+                                                <?php echo date('M d, Y', strtotime($unit['expiry_date'])); ?> ❌
+                                            </span>
+                                        <?php else: ?>
+                                            <?php echo date('M d, Y', strtotime($unit['expiry_date'])); ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-warning btn-sm" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#editModal"
+                                                data-unitid="<?php echo htmlspecialchars($unit['unit_id']); ?>"
+                                                data-status="<?php echo $unit['status']; ?>"
+                                                data-expiry="<?php echo $unit['expiry_date']; ?>">
+                                            <i class="bi bi-pencil"></i>
                                         </button>
-                                    </form>
-                                </td>
-                            </tr>
+                                        <form method="post" class="d-inline">
+                                            <input type="hidden" name="unit_id" value="<?php echo htmlspecialchars($unit['unit_id']); ?>">
+                                            <button type="submit" name="delete" class="btn btn-danger btn-sm" 
+                                                    onclick="return confirm('Delete this unit?')">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
                         </tbody>
@@ -267,27 +358,29 @@ include '_header.php';
                 </div>
             </div>
 
-            <!-- Donations by Blood Group -->
+            <!-- Units by Blood Group -->
             <div class="section-card">
                 <div class="section-title">
                     <i class="bi bi-pie-chart-fill text-success"></i>
-                    Donations by Blood Group
+                    Units by Blood Group
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>Blood Group</th>
-                                <th>Total Donations</th>
-                                <th>Total Volume</th>
+                                <th>Available</th>
+                                <th>Reserved</th>
+                                <th>Expired</th>
                             </tr>
                         </thead>
                         <tbody>
                         <?php foreach ($by_blood_group as $bg): ?>
                             <tr>
                                 <td><span class="badge bg-danger"><?php echo htmlspecialchars($bg['blood_group']); ?></span></td>
-                                <td><?php echo $bg['total_donations']; ?></td>
-                                <td><?php echo number_format($bg['total_volume']); ?> ml</td>
+                                <td><span class="badge bg-success"><?php echo $bg['available']; ?></span></td>
+                                <td><span class="badge bg-warning text-dark"><?php echo $bg['reserved']; ?></span></td>
+                                <td><span class="badge bg-secondary"><?php echo $bg['expired']; ?></span></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
@@ -295,67 +388,29 @@ include '_header.php';
                 </div>
             </div>
 
-            <!-- Top Donors -->
+            <!-- Units by Location -->
             <div class="section-card">
                 <div class="section-title">
-                    <i class="bi bi-trophy-fill text-warning"></i>
-                    Top 5 Donors
+                    <i class="bi bi-geo-alt-fill text-danger"></i>
+                    Units by Location
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Rank</th>
-                                <th>Donor Name</th>
-                                <th>Blood Group</th>
-                                <th>Donations</th>
-                                <th>Total Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php $rank = 1; foreach ($top_donors as $donor): ?>
-                            <tr>
-                                <td>
-                                    <?php if($rank <= 3): ?>
-                                        <span class="badge bg-warning text-dark">🏆 #<?php echo $rank; ?></span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">#<?php echo $rank; ?></span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="fw-semibold"><?php echo htmlspecialchars($donor['full_name']); ?></td>
-                                <td><span class="badge bg-danger"><?php echo htmlspecialchars($donor['blood_group']); ?></span></td>
-                                <td><?php echo $donor['donation_count']; ?> times</td>
-                                <td><?php echo number_format($donor['total_donated']); ?> ml</td>
-                            </tr>
-                        <?php $rank++; endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Donations per Camp -->
-            <div class="section-card">
-                <div class="section-title">
-                    <i class="bi bi-bar-chart-fill text-info"></i>
-                    Donations per Camp
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Camp Name</th>
                                 <th>Location</th>
-                                <th>Total Donations</th>
-                                <th>Total Volume</th>
+                                <th>Available</th>
+                                <th>Reserved</th>
+                                <th>Expired</th>
                             </tr>
                         </thead>
                         <tbody>
-                        <?php foreach ($by_camp as $camp): ?>
+                        <?php foreach ($by_location as $loc): ?>
                             <tr>
-                                <td class="fw-semibold"><?php echo htmlspecialchars($camp['title']); ?></td>
-                                <td><?php echo htmlspecialchars($camp['location_name']); ?></td>
-                                <td><span class="badge bg-primary"><?php echo $camp['total_donations']; ?></span></td>
-                                <td><?php echo number_format($camp['total_volume']); ?> ml</td>
+                                <td class="fw-semibold"><?php echo htmlspecialchars($loc['location_name']); ?></td>
+                                <td><span class="badge bg-success"><?php echo $loc['available']; ?></span></td>
+                                <td><span class="badge bg-warning text-dark"><?php echo $loc['reserved']; ?></span></td>
+                                <td><span class="badge bg-secondary"><?php echo $loc['expired']; ?></span></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
@@ -369,7 +424,6 @@ include '_header.php';
         <div class="col-12 col-lg-4">
             <div style="position: sticky; top: 20px;">
                 
-                <!-- Query Box -->
                 <div class="query-box">
                     <div class="d-flex align-items-center mb-3">
                         <i class="bi bi-code-square" style="font-size: 1.5rem; color: #60a5fa;"></i>
@@ -377,92 +431,103 @@ include '_header.php';
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#1 JOIN (Multiple Tables)-Purpose: Display all donations</div>
-                        <div class="query-sql">SELECT d.donation_id, d.donation_time,
-       d.volume_ml, donor.full_name,
-       donor.blood_group, camp.title,
-       location.name as location_name
-FROM donation d
-JOIN donor ON d.donor_id = donor.donor_id
-JOIN camp ON d.camp_id = camp.camp_id
-JOIN location 
-  ON camp.location_id = location.location_id
-ORDER BY d.donation_time DESC</div>
+                        <div class="query-badge">#1 Multi-table JOIN</div>
+                        <div class="query-title-text">Purpose: Display all units with complete details</div>
+                        <div class="query-sql">SELECT bu.unit_id, bu.status, 
+       bu.expiry_date,
+       d.full_name, d.blood_group,
+       l.name as location_name
+FROM blood_unit bu
+JOIN donation dn 
+  ON bu.donation_id = dn.donation_id
+JOIN donor d 
+  ON dn.donor_id = d.donor_id
+JOIN location l 
+  ON bu.location_id = l.location_id
+ORDER BY bu.created_at DESC</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#2 AGGREGATE (SUM) -Purpose: Calculate the total volume of blood donated</div>
-                        <div class="query-sql">SELECT SUM(volume_ml) as total
-FROM donation</div>
+                        <div class="query-badge">#2 GROUP BY (Status)</div>
+                        <div class="query-title-text">Purpose: Count units by status</div>
+                        <div class="query-sql">SELECT status, COUNT(*) as total
+FROM blood_unit
+GROUP BY status</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#3 GROUP BY + JOIN -Purpose: Show the number of donations and total volume per blood group</div>
-                        <div class="query-sql">SELECT donor.blood_group,
-       COUNT(d.donation_id) as total_donations,
-       SUM(d.volume_ml) as total_volume
-FROM donation d
-JOIN donor ON d.donor_id = donor.donor_id
-GROUP BY donor.blood_group
-ORDER BY total_donations DESC</div>
+                        <div class="query-badge">#3 AGGREGATE (COUNT)</div>
+                        <div class="query-title-text">Purpose: Total unit count</div>
+                        <div class="query-sql">SELECT COUNT(*) FROM blood_unit</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#4 DATE + SUBQUERY - Purpose: Count how many donations occurred in the last 30 days.</div>
-                        <div class="query-sql">SELECT COUNT(*) as count
-FROM donation
-WHERE donation_time >= 
-  DATE_SUB(CURDATE(), INTERVAL 30 DAY)</div>
+                        <div class="query-badge">#4 WHERE + DATE (Expiring)</div>
+                        <div class="query-title-text">Purpose: Find units expiring soon</div>
+                        <div class="query-sql">SELECT bu.unit_id, d.full_name, 
+       bu.expiry_date
+FROM blood_unit bu
+JOIN donation dn 
+  ON bu.donation_id = dn.donation_id
+JOIN donor d 
+  ON dn.donor_id = d.donor_id
+WHERE bu.expiry_date 
+  BETWEEN CURDATE() 
+  AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+AND bu.status = 'Available'</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#5 HAVING + LIMIT - Purpose: Find the Top 5 donors</div>
-                        <div class="query-sql">SELECT donor.full_name, 
-       COUNT(d.donation_id) as donation_count,
-       SUM(d.volume_ml) as total_donated
-FROM donor
-JOIN donation d 
-  ON donor.donor_id = d.donor_id
-GROUP BY donor.donor_id
-HAVING donation_count >= 1
-ORDER BY donation_count DESC
-LIMIT 5</div>
+                        <div class="query-badge">#5 CASE + GROUP BY</div>
+                        <div class="query-title-text">Purpose: Units by blood group with status</div>
+                        <div class="query-sql">SELECT d.blood_group,
+       COUNT(CASE WHEN bu.status = 'Available' 
+             THEN 1 END) as available,
+       COUNT(CASE WHEN bu.status = 'Reserved' 
+             THEN 1 END) as reserved
+FROM blood_unit bu
+JOIN donation dn 
+  ON bu.donation_id = dn.donation_id
+JOIN donor d 
+  ON dn.donor_id = d.donor_id
+GROUP BY d.blood_group</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#6 LEFT JOIN + GROUP BY - Purpose: Display total donations and volume for each camp</div>
-                        <div class="query-sql">SELECT camp.title, location.name,
-       COUNT(d.donation_id) as total_donations,
-       SUM(d.volume_ml) as total_volume
-FROM camp
-LEFT JOIN donation d 
-  ON camp.camp_id = d.camp_id
-LEFT JOIN location 
-  ON camp.location_id = location.location_id
-GROUP BY camp.camp_id
-ORDER BY total_donations DESC</div>
+                        <div class="query-badge">#6 JOIN + GROUP BY (Location)</div>
+                        <div class="query-title-text">Purpose: Units by location inventory</div>
+                        <div class="query-sql">SELECT l.name,
+       COUNT(CASE WHEN bu.status = 'Available' 
+             THEN 1 END) as available
+FROM blood_unit bu
+JOIN location l 
+  ON bu.location_id = l.location_id
+GROUP BY l.location_id, l.name</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#7 INSERT - Purpose: Add a new donation</div>
-                        <div class="query-sql">INSERT INTO donation 
-  (donor_id, camp_id, donation_time, 
-   volume_ml, created_at)
-VALUES (?, ?, ?, ?, NOW())</div>
+                        <div class="query-badge">#7 INSERT</div>
+                        <div class="query-title-text">Purpose: Add new blood unit</div>
+                        <div class="query-sql">INSERT INTO blood_unit 
+  (unit_id, donation_id, location_id, 
+   status, expiry_date, created_at)
+VALUES (?, ?, ?, ?, ?, NOW())</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#8 UPDATE - Purpose: Edit an existing donation</div>
-                        <div class="query-sql">UPDATE donation
-SET donor_id=?, camp_id=?, 
-    donation_time=?, volume_ml=?
-WHERE donation_id=?</div>
+                        <div class="query-badge">#8 UPDATE</div>
+                        <div class="query-title-text">Purpose: Update unit status and details</div>
+                        <div class="query-sql">UPDATE blood_unit
+SET donation_id=?, location_id=?, 
+    status=?, expiry_date=?
+WHERE unit_id=?</div>
                     </div>
 
                     <div class="mb-3">
-                        <div class="query-badge">#9 DELETE - Purpose: Remove a donation record</div>
-                        <div class="query-sql">DELETE FROM donation
-WHERE donation_id=?</div>
+                        <div class="query-badge">#9 DELETE</div>
+                        <div class="query-title-text">Purpose: Remove blood unit from inventory</div>
+                        <div class="query-sql">DELETE FROM blood_unit
+WHERE unit_id=?</div>
                     </div>
 
                 </div>
@@ -478,44 +543,50 @@ WHERE donation_id=?</div>
         <div class="modal-content">
             <form method="post">
                 <div class="modal-header">
-                    <h5 class="modal-title">Add New Donation</h5>
+                    <h5 class="modal-title">Add New Blood Unit</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label">Donor</label>
-                        <select name="donor_id" class="form-select" required>
-                            <option value="">Select Donor</option>
-                            <?php foreach ($donors as $donor): ?>
-                                <option value="<?php echo $donor['donor_id']; ?>">
-                                    <?php echo htmlspecialchars($donor['full_name']); ?> (<?php echo $donor['blood_group']; ?>)
+                        <label class="form-label">Unit ID</label>
+                        <input type="text" class="form-control" name="unit_id" required placeholder="e.g. BU001">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Donation</label>
+                        <select class="form-select" name="donation_id" required>
+                            <option value="">Select Donation</option>
+                            <?php foreach ($donations as $don): ?>
+                                <option value="<?php echo $don['donation_id']; ?>">
+                                    <?php echo htmlspecialchars($don['full_name']); ?> - <?php echo $don['blood_group']; ?> (<?php echo date('M d, Y', strtotime($don['donation_time'])); ?>)
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Camp</label>
-                        <select name="camp_id" class="form-select" required>
-                            <option value="">Select Camp</option>
-                            <?php foreach ($camps as $camp): ?>
-                                <option value="<?php echo $camp['camp_id']; ?>">
-                                    <?php echo htmlspecialchars($camp['title']); ?>
-                                </option>
+                        <label class="form-label">Storage Location</label>
+                        <select class="form-select" name="location_id" required>
+                            <option value="">Select Location</option>
+                            <?php foreach ($locations as $loc): ?>
+                                <option value="<?php echo $loc['location_id']; ?>"><?php echo htmlspecialchars($loc['name']); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Donation Date & Time</label>
-                        <input type="datetime-local" name="donation_time" class="form-control" required>
+                        <label class="form-label">Status</label>
+                        <select class="form-select" name="status" required>
+                            <option value="Available">Available</option>
+                            <option value="Reserved">Reserved</option>
+                            <option value="Expired">Expired</option>
+                        </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Volume (ml)</label>
-                        <input type="number" name="volume_ml" class="form-control" min="1" max="1000" required placeholder="e.g. 450">
+                        <label class="form-label">Expiry Date</label>
+                        <input type="date" class="form-control" name="expiry_date" required>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="add" class="btn btn-primary">Add Donation</button>
+                    <button type="submit" name="add" class="btn btn-primary">Add Unit</button>
                 </div>
             </form>
         </div>
@@ -527,44 +598,34 @@ WHERE donation_id=?</div>
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post">
+                <input type="hidden" name="unit_id" id="editUnitId">
+                <input type="hidden" name="donation_id" value="1">
+                <input type="hidden" name="location_id" value="1">
                 <div class="modal-header">
-                    <h5 class="modal-title">Edit Donation</h5>
+                    <h5 class="modal-title">Update Blood Unit Status</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <input type="hidden" name="donation_id" id="edit_donation_id">
                     <div class="mb-3">
-                        <label class="form-label">Donor</label>
-                        <select name="donor_id" id="edit_donor_id" class="form-select" required>
-                            <?php foreach ($donors as $donor): ?>
-                                <option value="<?php echo $donor['donor_id']; ?>">
-                                    <?php echo htmlspecialchars($donor['full_name']); ?> (<?php echo $donor['blood_group']; ?>)
-                                </option>
-                            <?php endforeach; ?>
+                        <label class="form-label">Unit ID</label>
+                        <input type="text" class="form-control" id="displayUnitId" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" id="editStatus" name="status" required>
+                            <option value="Available">Available</option>
+                            <option value="Reserved">Reserved</option>
+                            <option value="Expired">Expired</option>
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Camp</label>
-                        <select name="camp_id" id="edit_camp_id" class="form-select" required>
-                            <?php foreach ($camps as $camp): ?>
-                                <option value="<?php echo $camp['camp_id']; ?>">
-                                    <?php echo htmlspecialchars($camp['title']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Donation Date & Time</label>
-                        <input type="datetime-local" name="donation_time" id="edit_donation_time" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Volume (ml)</label>
-                        <input type="number" name="volume_ml" id="edit_volume_ml" class="form-control" min="1" max="1000" required>
+                        <label class="form-label">Expiry Date</label>
+                        <input type="date" class="form-control" id="editExpiry" name="expiry_date" required>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="update" class="btn btn-warning">Update Donation</button>
+                    <button type="submit" name="update" class="btn btn-warning">Update Unit</button>
                 </div>
             </form>
         </div>
@@ -572,15 +633,16 @@ WHERE donation_id=?</div>
 </div>
 
 <script>
-// Populate edit modal with data
+// Populate edit modal
 document.addEventListener('DOMContentLoaded', function() {
     var editModal = document.getElementById('editModal');
     if (editModal) {
         editModal.addEventListener('show.bs.modal', function(event) {
             var button = event.relatedTarget;
-            document.getElementById('edit_donation_id').value = button.getAttribute('data-id');
-            document.getElementById('edit_donation_time').value = button.getAttribute('data-time');
-            document.getElementById('edit_volume_ml').value = button.getAttribute('data-volume');
+            document.getElementById('editUnitId').value = button.getAttribute('data-unitid');
+            document.getElementById('displayUnitId').value = button.getAttribute('data-unitid');
+            document.getElementById('editStatus').value = button.getAttribute('data-status');
+            document.getElementById('editExpiry').value = button.getAttribute('data-expiry');
         });
     }
 });
